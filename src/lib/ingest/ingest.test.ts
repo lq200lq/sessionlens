@@ -425,4 +425,252 @@ describe("ingestSessionLog", () => {
     if (!result.ok) return;
     expect(result.session.subagent).toBe(true);
   });
+
+  it("rebuilds a Claude task snapshot from TaskCreate/Update/Stop and cost-state", () => {
+    const result = ingest([
+      {
+        type: "user",
+        uuid: "u1",
+        sessionId: "sid",
+        timestamp: "2026-01-01T00:00:00Z",
+        origin: { kind: "human" },
+        message: { role: "user", content: "work" },
+      },
+      {
+        type: "assistant",
+        uuid: "a1",
+        parentUuid: "u1",
+        timestamp: "2026-01-01T00:00:01Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tc1",
+              name: "TaskCreate",
+              input: { subject: "Parse logs", description: "ingest" },
+            },
+          ],
+        },
+      },
+      {
+        type: "user",
+        uuid: "u2",
+        parentUuid: "a1",
+        timestamp: "2026-01-01T00:00:02Z",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "tc1", content: "created" }],
+        },
+        toolUseResult: { task: { id: "task-real", subject: "Parse logs" } },
+      },
+      {
+        type: "assistant",
+        uuid: "a2",
+        parentUuid: "u2",
+        timestamp: "2026-01-01T00:00:03Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tu1",
+              name: "TaskUpdate",
+              input: { taskId: "task-real", status: "in_progress" },
+            },
+          ],
+        },
+      },
+      {
+        type: "user",
+        uuid: "u3",
+        parentUuid: "a2",
+        timestamp: "2026-01-01T00:00:04Z",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "tu1", content: "ok" }],
+        },
+      },
+      {
+        type: "assistant",
+        uuid: "a3",
+        parentUuid: "a2",
+        timestamp: "2026-01-01T00:00:05Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "ts1",
+              name: "TaskStop",
+              input: { task_id: "task-real" },
+            },
+          ],
+        },
+      },
+      {
+        type: "user",
+        uuid: "u4",
+        parentUuid: "a3",
+        timestamp: "2026-01-01T00:00:06Z",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "ts1", content: "stopped" }],
+        },
+      },
+      {
+        type: "system",
+        subtype: "turn_duration",
+        parentUuid: "u1",
+        durationMs: 1500,
+        timestamp: "2026-01-01T00:00:07Z",
+      },
+      {
+        type: "cost-state",
+        totalCostUSD: 0.4,
+        totalDuration: 8000,
+        totalAPIDuration: 3000,
+        totalToolDuration: 2000,
+        totalLinesAdded: 12,
+        totalLinesRemoved: 3,
+        timestamp: "2026-01-01T00:00:08Z",
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.session.tasks).toEqual([
+      expect.objectContaining({
+        id: "task-real",
+        title: "Parse logs",
+        status: "cancelled",
+        originTurnId: "a1",
+      }),
+    ]);
+    expect(result.session.turns.find((t) => t.id === "u1")?.durationMs).toBe(1500);
+    expect(result.session.stats?.wallMs).toBe(8000);
+    expect(result.session.stats?.apiMs).toBe(3000);
+    expect(result.session.stats?.toolMs).toBe(2000);
+    expect(result.session.stats?.totalMs).toBe(8000);
+    expect(result.session.stats?.linesAdded).toBe(12);
+    expect(result.session.stats?.linesRemoved).toBe(3);
+    expect(result.session.tokenSummary?.costUsd).toBe(0.4);
+  });
+
+  it("keeps the last Codex update_plan snapshot and parses duration dicts", () => {
+    const result = ingest([
+      {
+        timestamp: "2026-09-09T00:00:00Z",
+        type: "session_meta",
+        payload: { id: "codex-plan", cwd: "/tmp" },
+      },
+      {
+        timestamp: "2026-09-09T00:00:01Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "plan it" }],
+        },
+      },
+      {
+        timestamp: "2026-09-09T00:00:02Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          call_id: "p1",
+          name: "update_plan",
+          arguments: JSON.stringify({
+            plan: [
+              { step: "old", status: "completed" },
+              { step: "stale", status: "pending" },
+            ],
+          }),
+        },
+      },
+      {
+        timestamp: "2026-09-09T00:00:03Z",
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          call_id: "p1",
+          output: "ok",
+        },
+      },
+      {
+        timestamp: "2026-09-09T00:01:00Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          call_id: "p2",
+          name: "update_plan",
+          arguments: JSON.stringify({
+            plan: [
+              { step: "Parse jsonl", status: "completed" },
+              { step: "Show tasks", status: "in_progress" },
+              { step: "Ship", status: "pending" },
+            ],
+          }),
+        },
+      },
+      {
+        timestamp: "2026-09-09T00:01:01Z",
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          call_id: "e1",
+          name: "exec",
+          input: JSON.stringify({ command: "ls" }),
+        },
+      },
+      {
+        timestamp: "2026-09-09T00:01:02Z",
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "e1",
+          output: "ok",
+        },
+      },
+      {
+        timestamp: "2026-09-09T00:01:03Z",
+        type: "event_msg",
+        payload: {
+          type: "item_completed",
+          item: {
+            type: "CommandExecution",
+            command: ["ls"],
+            exit_code: 0,
+            duration: { secs: 2, nanos: 0 },
+          },
+        },
+      },
+      {
+        timestamp: "2026-09-09T00:01:04Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          duration_ms: 64000,
+        },
+      },
+      {
+        timestamp: "2026-09-09T00:01:05Z",
+        type: "event_msg",
+        payload: { type: "turn_aborted", reason: "user" },
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.session.tasks?.map((t) => t.title)).toEqual(["Parse jsonl", "Show tasks", "Ship"]);
+    expect(result.session.tasks?.map((t) => t.status)).toEqual([
+      "completed",
+      "in_progress",
+      "pending",
+    ]);
+    const exec = result.session.turns.flatMap((t) => t.tools).find((t) => t.name === "exec");
+    expect(exec?.durationMs).toBe(2000);
+    expect(exec?.exitCode).toBe(0);
+    expect(result.session.stats?.abortedCount).toBe(1);
+    expect(result.session.stats?.lastTurnMs).toBe(64000);
+    expect(result.session.stats?.wallMs).toBe(65000);
+  });
 });

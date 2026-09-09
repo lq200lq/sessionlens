@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Session, Turn } from "@/lib/ingest/types";
+import type { Session, TaskItem, TaskStatus, Turn } from "@/lib/ingest/types";
 import { parseSlashCommand, stringifyUnknown, type SlashCommand } from "@/lib/ingest/util";
-import { formatTurnTime } from "@/lib/display";
+import { errorToolCount, formatDurationMs, formatTurnTime, slowestToolMs } from "@/lib/display";
 import { rawEventLabel } from "@/lib/tool-view";
 import { CopyButton, RichText, ToolCard } from "./Blocks";
 import { ChevronDown } from "lucide-react";
@@ -219,6 +219,23 @@ export function SummaryBar({ session }: { session: Session }) {
       items.push({ label: "tokens", value: `${tok.inputTokens ?? 0}→${tok.outputTokens ?? 0}` });
     }
     if (tok?.costUsd != null) items.push({ label: "费用", value: `$${tok.costUsd}` });
+    const wall = session.stats?.wallMs ?? session.stats?.totalMs;
+    if (wall) items.push({ label: "时长", value: formatDurationMs(wall) });
+    const errors = errorToolCount(session.turns);
+    if (errors) items.push({ label: "失败", value: `${errors} 次工具` });
+    const added = session.stats?.linesAdded;
+    const removed = session.stats?.linesRemoved;
+    if (added || removed) {
+      items.push({
+        label: "改动",
+        value: `${added ? `+${added}` : ""}${added && removed ? " " : ""}${removed ? `-${removed}` : ""}`,
+      });
+    }
+    if (session.stats?.abortedCount) {
+      items.push({ label: "中止", value: `${session.stats.abortedCount} 轮` });
+    }
+    const slowest = slowestToolMs(session.turns);
+    if (slowest) items.push({ label: "最慢工具", value: formatDurationMs(slowest) });
     if (session.subagent) items.push({ label: "类型", value: "子 agent" });
     if (session.skippedLineCount) items.push({ label: "跳过", value: `${session.skippedLineCount} 行` });
     return items;
@@ -233,6 +250,81 @@ export function SummaryBar({ session }: { session: Session }) {
       {chips.map((chip) => (
         <Chip key={`${chip.label}-${chip.value}`} {...chip} />
       ))}
+    </div>
+  );
+}
+
+const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  pending: "待办",
+  in_progress: "进行中",
+  completed: "完成",
+  cancelled: "已取消",
+};
+
+export function TaskPanel({
+  tasks,
+  selectedTurnId,
+  onSelectTurn,
+}: {
+  tasks: TaskItem[];
+  selectedTurnId?: string;
+  onSelectTurn: (id: string) => void;
+}) {
+  if (!tasks.length) return null;
+  return (
+    <div className="border-b px-4 py-2" style={{ borderColor: "var(--line)" }}>
+      <div className="mb-1.5 text-[11px] uppercase tracking-wider" style={{ color: "var(--faint)" }}>
+        任务 {tasks.length}
+      </div>
+      <ul className="scrollbar-thin max-h-36 space-y-0.5 overflow-auto">
+        {tasks.map((task) => {
+          const active = Boolean(task.originTurnId && task.originTurnId === selectedTurnId);
+          const clickable = Boolean(task.originTurnId);
+          const tone =
+            task.status === "in_progress"
+              ? "var(--accent)"
+              : task.status === "cancelled"
+                ? "var(--danger)"
+                : "var(--muted)";
+          return (
+            <li key={task.id}>
+              <button
+                type="button"
+                disabled={!clickable}
+                onClick={() => {
+                  if (task.originTurnId) onSelectTurn(task.originTurnId);
+                }}
+                className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-[12px]"
+                style={{
+                  background: active ? "var(--accent-dim)" : "transparent",
+                  color: tone,
+                  cursor: clickable ? "pointer" : "default",
+                }}
+              >
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{
+                    background:
+                      task.status === "completed"
+                        ? "var(--ok)"
+                        : task.status === "in_progress"
+                          ? "var(--accent)"
+                          : task.status === "cancelled"
+                            ? "var(--danger)"
+                            : "var(--faint)",
+                  }}
+                />
+                <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text)" }}>
+                  {task.title}
+                </span>
+                <span className="shrink-0 text-[11px]" style={{ color: "var(--faint)" }}>
+                  {TASK_STATUS_LABEL[task.status]}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

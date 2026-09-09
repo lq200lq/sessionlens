@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ToolInvocation } from "@/lib/ingest/types";
 import { stringifyUnknown } from "@/lib/ingest/util";
+import { formatDurationMs } from "@/lib/display";
 import { presentTool } from "@/lib/tool-view";
 import { Check, Copy, ChevronRight } from "lucide-react";
 
@@ -111,7 +112,7 @@ export function ToolCard({ tool }: { tool: ToolInvocation }) {
             </span>
           ) : (
             <span className="text-[11px]" style={{ color: "var(--faint)" }}>
-              {tool.durationMs != null ? `${tool.durationMs}ms` : "ok"}
+              {tool.durationMs != null ? formatDurationMs(tool.durationMs) : "ok"}
             </span>
           )}
         </div>

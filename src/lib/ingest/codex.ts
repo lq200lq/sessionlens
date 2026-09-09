@@ -1,11 +1,23 @@
 import type {
   InternalEvent,
   Session,
+  SessionStats,
+  TaskItem,
   TokenSummary,
   ToolInvocation,
   Turn,
 } from "./types";
-import { asNumber, asRecord, asString, fallbackTitle, humanizeSessionText } from "./util";
+import {
+  asNumber,
+  asRecord,
+  asString,
+  compactSessionStats,
+  fallbackTitle,
+  humanizeSessionText,
+  mapTaskStatus,
+  parseDurationMs,
+  wallMsFromIso,
+} from "./util";
 
 function collectText(content: unknown, wantedType: string): string {
   if (typeof content === "string") return content;
@@ -35,19 +47,48 @@ function outputText(output: unknown): unknown {
   return output;
 }
 
+function commandText(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (Array.isArray(value)) {
+    const joined = value.filter((part): part is string => typeof part === "string").join(" ").trim();
+    return joined || undefined;
+  }
+  return undefined;
+}
+
+function applyUpdatePlan(input: unknown, turn: Turn): TaskItem[] | undefined {
+  const rec = asRecord(input);
+  const plan = rec?.plan;
+  if (!Array.isArray(plan)) return undefined;
+  const items: TaskItem[] = [];
+  plan.forEach((entry, index) => {
+    const row = asRecord(entry);
+    if (!row) return;
+    const title = asString(row.step)?.trim() ?? asString(row.text)?.trim();
+    if (!title) return;
+    items.push({
+      id: asString(row.id) ?? `plan-${index}`,
+      title,
+      status: mapTaskStatus(row.status) ?? "pending",
+      originTurnId: turn.id,
+    });
+  });
+  return items;
+}
+
 function parseCommandHint(input: unknown): string | undefined {
   if (typeof input === "string") {
     const trimmed = input.trim();
     try {
       const parsed = JSON.parse(trimmed) as unknown;
       const rec = asRecord(parsed);
-      return asString(rec?.command) ?? asString(rec?.cmd) ?? trimmed;
+      return commandText(rec?.command) ?? commandText(rec?.cmd) ?? trimmed;
     } catch {
       return trimmed;
     }
   }
   const rec = asRecord(input);
-  return asString(rec?.command) ?? asString(rec?.cmd);
+  return commandText(rec?.command) ?? commandText(rec?.cmd);
 }
 
 export function ingestCodex(
@@ -64,13 +105,19 @@ export function ingestCodex(
   let gitBranch: string | undefined;
   let model: string | undefined;
   let startedAt: string | undefined;
+  let endedAt: string | undefined;
   let sessionId: string | undefined;
   let subagent = false;
   let firstUserText: string | undefined;
   let internalIndex = 0;
+  let abortedCount = 0;
+  let lastTurnMs: number | undefined;
+  let tasks: TaskItem[] | undefined;
   const tokenSummary: TokenSummary = {};
+  const stats: SessionStats = {};
   const execCandidates: { command: string; exitCode?: number; durationMs?: number; ts?: string }[] =
     [];
+  const mcpCandidates: { name: string; durationMs?: number }[] = [];
 
   const pushInternal = (
     row: Record<string, unknown>,
@@ -110,6 +157,7 @@ export function ingestCodex(
     const payload = asRecord(row.payload) ?? {};
     const ts = asString(row.timestamp);
     if (!startedAt) startedAt = ts;
+    if (ts) endedAt = ts;
 
     if (type === "session_meta") {
       sessionId = asString(payload.id) ?? asString(payload.session_id) ?? sessionId;
@@ -160,12 +208,27 @@ export function ingestCodex(
         const item = asRecord(payload.item);
         if (item?.type === "CommandExecution") {
           execCandidates.push({
-            command: asString(item.command) ?? "",
+            command: commandText(item.command) ?? "",
             exitCode: asNumber(item.exit_code),
-            durationMs: asNumber(item.duration) ?? asNumber(item.duration_ms),
+            durationMs: parseDurationMs(item.duration) ?? parseDurationMs(item.duration_ms),
             ts,
           });
         }
+        if (item?.type === "McpToolCall") {
+          const name = asString(item.tool) ?? asString(item.name);
+          if (name) {
+            mcpCandidates.push({
+              name,
+              durationMs: parseDurationMs(item.duration) ?? parseDurationMs(item.duration_ms),
+            });
+          }
+        }
+      }
+      if (payloadType === "task_complete") {
+        lastTurnMs = parseDurationMs(payload.duration_ms) ?? lastTurnMs;
+      }
+      if (payloadType === "turn_aborted") {
+        abortedCount += 1;
       }
       pushInternal(row, `event_msg:${payloadType}`, payloadType);
       continue;
@@ -246,6 +309,10 @@ export function ingestCodex(
       turn.tools.push(tool);
       toolsByCallId.set(callId, tool);
       turnByCallId.set(callId, turn);
+      if (tool.name === "update_plan") {
+        const next = applyUpdatePlan(input, turn);
+        if (next) tasks = next;
+      }
       continue;
     }
 
@@ -269,19 +336,38 @@ export function ingestCodex(
   }
 
   for (const tool of toolsByCallId.values()) {
-    if (tool.name !== "exec" && tool.name !== "exec_command") continue;
-    const hint = parseCommandHint(tool.input);
-    if (!hint) continue;
-    const match = execCandidates.find(
-      (candidate) => candidate.command && (candidate.command === hint || candidate.command.includes(hint) || hint.includes(candidate.command)),
-    );
-    if (!match) continue;
-    if (match.exitCode != null) {
-      tool.exitCode = match.exitCode;
-      if (match.exitCode !== 0) tool.isError = true;
+    if (tool.name === "exec" || tool.name === "exec_command") {
+      const hint = parseCommandHint(tool.input);
+      if (hint) {
+        const match = execCandidates.find(
+          (candidate) =>
+            candidate.command &&
+            (candidate.command === hint || candidate.command.includes(hint) || hint.includes(candidate.command)),
+        );
+        if (match) {
+          if (match.exitCode != null) {
+            tool.exitCode = match.exitCode;
+            if (match.exitCode !== 0) tool.isError = true;
+          }
+          if (match.durationMs != null) tool.durationMs = match.durationMs;
+        }
+      }
     }
-    if (match.durationMs != null) tool.durationMs = match.durationMs;
+    if (tool.durationMs == null) {
+      const mcpIndex = mcpCandidates.findIndex(
+        (candidate) =>
+          candidate.durationMs != null &&
+          (candidate.name === tool.name || tool.name.endsWith(candidate.name) || tool.name.includes(candidate.name)),
+      );
+      if (mcpIndex >= 0) {
+        tool.durationMs = mcpCandidates[mcpIndex]?.durationMs;
+        mcpCandidates.splice(mcpIndex, 1);
+      }
+    }
   }
+
+  if (abortedCount) stats.abortedCount = abortedCount;
+  if (lastTurnMs != null) stats.lastTurnMs = lastTurnMs;
 
   return {
     id: sessionId ?? crypto.randomUUID(),
@@ -294,6 +380,8 @@ export function ingestCodex(
     importedAt: nowIso,
     lastOpenedAt: nowIso,
     tokenSummary: Object.keys(tokenSummary).length ? tokenSummary : undefined,
+    stats: compactSessionStats({ ...stats, wallMs: wallMsFromIso(startedAt, endedAt) }),
+    tasks: tasks?.length ? tasks : undefined,
     turns,
     internals,
     skippedLineCount: 0,

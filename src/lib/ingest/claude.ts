@@ -2,6 +2,8 @@ import type {
   ContentBlock,
   InternalEvent,
   Session,
+  SessionStats,
+  TaskItem,
   TokenSummary,
   ToolInvocation,
   Turn,
@@ -10,9 +12,12 @@ import {
   asNumber,
   asRecord,
   asString,
+  compactSessionStats,
   fallbackTitle,
   humanizeSessionText,
+  mapTaskStatus,
   previewText,
+  wallMsFromIso,
 } from "./util";
 
 const CLAUDE_INTERNAL_TYPES = new Set([
@@ -90,12 +95,15 @@ function attachToolResults(
   content: unknown,
   structured: unknown,
   row: Record<string, unknown>,
+  tasks: Map<string, TaskItem>,
+  taskAliases: Map<string, string>,
 ) {
   if (!Array.isArray(content)) return;
   const resultBlocks = content
     .map(asRecord)
     .filter((block): block is Record<string, unknown> => Boolean(block && block.type === "tool_result"));
   const touched = new Set<Turn>();
+  const struct = asRecord(structured);
   for (const block of resultBlocks) {
     const id = asString(block.tool_use_id);
     if (!id) continue;
@@ -111,6 +119,51 @@ function attachToolResults(
       turn.rawEvents = [...(turn.rawEvents ?? []), row];
       touched.add(turn);
     }
+    if (tool.name === "TaskCreate") {
+      const created = asRecord(struct?.task);
+      const realId = asString(created?.id);
+      const existing = tasks.get(taskAliases.get(id) ?? id) ?? tasks.get(id);
+      if (existing && realId && realId !== existing.id) {
+        tasks.delete(existing.id);
+        existing.id = realId;
+        tasks.set(realId, existing);
+        taskAliases.set(id, realId);
+      }
+    }
+  }
+}
+
+function applyClaudeTaskTool(
+  tool: ToolInvocation,
+  turn: Turn,
+  tasks: Map<string, TaskItem>,
+  aliases: Map<string, string>,
+) {
+  const input = asRecord(tool.input);
+  if (tool.name === "TaskCreate") {
+    const title = asString(input?.subject)?.trim() || "task";
+    const item: TaskItem = {
+      id: tool.id,
+      title,
+      status: "pending",
+      originTurnId: turn.id,
+    };
+    tasks.set(item.id, item);
+    return;
+  }
+  if (tool.name === "TaskUpdate") {
+    const taskId = asString(input?.taskId);
+    const status = mapTaskStatus(input?.status);
+    if (!taskId || !status) return;
+    const item = tasks.get(aliases.get(taskId) ?? taskId);
+    if (item) item.status = status;
+    return;
+  }
+  if (tool.name === "TaskStop") {
+    const taskId = asString(input?.task_id) ?? asString(input?.taskId);
+    if (!taskId) return;
+    const item = tasks.get(aliases.get(taskId) ?? taskId);
+    if (item) item.status = "cancelled";
   }
 }
 
@@ -137,10 +190,15 @@ export function ingestClaude(
   const toolsById = new Map<string, ToolInvocation>();
   const turnByToolId = new Map<string, Turn>();
   const tokenSummary: TokenSummary = {};
+  const stats: SessionStats = {};
+  const tasks = new Map<string, TaskItem>();
+  const taskAliases = new Map<string, string>();
+  const turnsById = new Map<string, Turn>();
   let cwd: string | undefined;
   let gitBranch: string | undefined;
   let model: string | undefined;
   let startedAt: string | undefined;
+  let endedAt: string | undefined;
   let sessionId: string | undefined;
   let aiTitle: string | undefined;
   let lastIncludedUuid: string | undefined;
@@ -161,7 +219,9 @@ export function ingestClaude(
     sessionId = asString(row.sessionId) ?? asString(row.session_id) ?? sessionId;
     if (!cwd) cwd = asString(row.cwd);
     if (!gitBranch) gitBranch = asString(row.gitBranch);
-    if (!startedAt) startedAt = asString(row.timestamp);
+    const ts = asString(row.timestamp);
+    if (!startedAt) startedAt = ts;
+    if (ts) endedAt = ts;
 
     if (type === "ai-title") {
       aiTitle = asString(row.aiTitle) ?? aiTitle;
@@ -172,7 +232,26 @@ export function ingestClaude(
     if (type === "cost-state") {
       const cost = asNumber(row.totalCostUSD);
       if (cost != null) tokenSummary.costUsd = cost;
+      stats.apiMs = asNumber(row.totalAPIDuration) ?? stats.apiMs;
+      stats.toolMs = asNumber(row.totalToolDuration) ?? stats.toolMs;
+      stats.totalMs = asNumber(row.totalDuration) ?? stats.totalMs;
+      stats.linesAdded = asNumber(row.totalLinesAdded) ?? stats.linesAdded;
+      stats.linesRemoved = asNumber(row.totalLinesRemoved) ?? stats.linesRemoved;
       pushInternal(row, type, `cost ${cost ?? "?"}`);
+      continue;
+    }
+
+    if (type === "system") {
+      const subtype = asString(row.subtype);
+      if (subtype === "turn_duration") {
+        const durationMs = asNumber(row.durationMs);
+        const parent = asString(row.parentUuid);
+        if (durationMs != null && parent) {
+          const parentTurn = turnsById.get(parent);
+          if (parentTurn && parentTurn.durationMs == null) parentTurn.durationMs = durationMs;
+        }
+      }
+      pushInternal(row, type, subtype ?? type);
       continue;
     }
 
@@ -202,11 +281,13 @@ export function ingestClaude(
       for (const tool of tools) {
         toolsById.set(tool.id, tool);
         turnByToolId.set(tool.id, turn);
+        applyClaudeTaskTool(tool, turn, tasks, taskAliases);
       }
       const usage = asRecord(message?.usage);
       addUsage(tokenSummary, usage);
       model = asString(message?.model) ?? model;
       turns.push(turn);
+      turnsById.set(uuid, turn);
       lastIncludedUuid = uuid;
       continue;
     }
@@ -214,7 +295,7 @@ export function ingestClaude(
     if (type === "user") {
       const message = asRecord(row.message);
       const content = messageContent(message);
-      attachToolResults(toolsById, turnByToolId, content, row.toolUseResult, row);
+      attachToolResults(toolsById, turnByToolId, content, row.toolUseResult, row, tasks, taskAliases);
       const text = humanUserText(row);
       if (!text) {
         if (row.isMeta === true) {
@@ -228,7 +309,7 @@ export function ingestClaude(
       if (parent && lastIncludedUuid && parent !== lastIncludedUuid) {
         branchMarker = "retry";
       }
-      turns.push({
+      const userTurn: Turn = {
         id: uuid,
         timestamp: asString(row.timestamp),
         role: "user",
@@ -236,7 +317,9 @@ export function ingestClaude(
         tools: [],
         branchMarker,
         rawEvents: [row],
-      });
+      };
+      turns.push(userTurn);
+      turnsById.set(uuid, userTurn);
       lastIncludedUuid = uuid;
       continue;
     }
@@ -264,6 +347,8 @@ export function ingestClaude(
     importedAt: nowIso,
     lastOpenedAt: nowIso,
     tokenSummary: Object.keys(tokenSummary).length ? tokenSummary : undefined,
+    stats: compactSessionStats({ ...stats, wallMs: wallMsFromIso(startedAt, endedAt) }),
+    tasks: tasks.size ? [...tasks.values()] : undefined,
     turns,
     internals,
     skippedLineCount: 0,

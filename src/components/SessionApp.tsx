@@ -21,7 +21,7 @@ import { MOTION, gsap, prefersReducedMotion, useGSAP } from "@/lib/motion";
 import { SourceBadge } from "./SourceBadge";
 import { ThemeToggle } from "./ThemeToggle";
 import { Timeline, matchesFilter, type Filter } from "./Timeline";
-import { DetailPane, SummaryBar } from "./DetailPane";
+import { DetailPane, SummaryBar, TaskPanel } from "./DetailPane";
 
 function setQueryId(id: string | null) {
   const url = new URL(window.location.href);
@@ -559,14 +559,25 @@ export function SessionApp() {
                 <section
                   ref={detailRef}
                   tabIndex={-1}
-                  className="min-h-0 min-w-0 flex-1 outline-none"
+                  className="flex min-h-0 min-w-0 flex-1 flex-col outline-none"
                 >
                   {pane === "internals" ? (
                     <div className="flex h-full items-center justify-center p-8 text-[13px]" style={{ color: "var(--muted)" }}>
                       内部事件列在左侧。选「回合」继续读会话。
                     </div>
                   ) : (
-                    <DetailPane turn={selected} />
+                    <>
+                      {session.tasks?.length ? (
+                        <TaskPanel
+                          tasks={session.tasks}
+                          selectedTurnId={selected?.id}
+                          onSelectTurn={setSelectedTurn}
+                        />
+                      ) : null}
+                      <div className="min-h-0 flex-1">
+                        <DetailPane turn={selected} />
+                      </div>
+                    </>
                   )}
                 </section>
               </div>

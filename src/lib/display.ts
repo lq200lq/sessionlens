@@ -1,4 +1,4 @@
-import type { Turn } from "./ingest/types";
+import type { ToolInvocation, Turn } from "./ingest/types";
 
 export function initialTurnId(turns: Turn[]): string | undefined {
   const user = turns.find((turn) => turn.role === "user");
@@ -58,6 +58,41 @@ export function formatDayLabel(iso?: string): string | undefined {
 export function isToolOnlyTurn(turn: Turn): boolean {
   if (turn.role !== "assistant" || turn.tools.length === 0) return false;
   return !turn.blocks.some((block) => block.kind === "text" && block.text.trim());
+}
+
+export function formatDurationMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) {
+    const seconds = ms / 1000;
+    const rounded = seconds >= 10 ? Math.round(seconds) : Math.round(seconds * 10) / 10;
+    return `${rounded}s`;
+  }
+  const totalSec = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSec / 60);
+  const seconds = totalSec % 60;
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+export function isFailedTool(tool: ToolInvocation): boolean {
+  return tool.isError || (tool.exitCode != null && tool.exitCode !== 0);
+}
+
+export function errorToolCount(turns: Turn[]): number {
+  return turns.reduce(
+    (count, turn) => count + turn.tools.filter(isFailedTool).length,
+    0,
+  );
+}
+
+export function slowestToolMs(turns: Turn[]): number | undefined {
+  let max: number | undefined;
+  for (const turn of turns) {
+    for (const tool of turn.tools) {
+      if (tool.durationMs == null) continue;
+      if (max == null || tool.durationMs > max) max = tool.durationMs;
+    }
+  }
+  return max;
 }
 
 export function importSummary(turns: Turn[]): string {

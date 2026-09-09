@@ -24,8 +24,30 @@ export type Turn = {
   blocks: ContentBlock[];
   tools: ToolInvocation[];
   branchMarker?: "branch" | "retry";
+  durationMs?: number;
   /** Original jsonl row(s) that produced this turn, in file order. */
   rawEvents?: unknown[];
+};
+
+export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
+
+export type TaskItem = {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  originTurnId?: string;
+};
+
+/** Session-level numbers taken from the log. Tool error/slowest counts are derived in the UI. */
+export type SessionStats = {
+  wallMs?: number;
+  apiMs?: number;
+  toolMs?: number;
+  totalMs?: number;
+  linesAdded?: number;
+  linesRemoved?: number;
+  abortedCount?: number;
+  lastTurnMs?: number;
 };
 
 export type InternalEvent = {
@@ -55,6 +77,8 @@ export type Session = {
   importedAt: string;
   lastOpenedAt: string;
   tokenSummary?: TokenSummary;
+  stats?: SessionStats;
+  tasks?: TaskItem[];
   turns: Turn[];
   internals: InternalEvent[];
   skippedLineCount: number;

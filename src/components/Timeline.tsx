@@ -7,6 +7,7 @@ import { humanizeSessionText } from "@/lib/ingest/util";
 import {
   formatClockTime,
   formatDayLabel,
+  formatDurationMs,
   formatTurnTime,
   isToolOnlyTurn,
   sameCalendarDay,
@@ -53,6 +54,7 @@ function ToolChips({ tools }: { tools: Turn["tools"] }) {
             }}
           >
             {tool.name}
+            {tool.durationMs != null ? ` ${formatDurationMs(tool.durationMs)}` : ""}
           </span>
         );
       })}

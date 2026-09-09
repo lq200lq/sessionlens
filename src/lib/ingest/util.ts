@@ -1,3 +1,5 @@
+import type { SessionStats, TaskStatus } from "./types";
+
 export function jsonlLines(text: string): string[] {
   return text.split(/\r?\n/);
 }
@@ -66,6 +68,45 @@ export function asString(value: unknown): string | undefined {
 
 export function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** Number of milliseconds, or Codex `{ secs, nanos }`. */
+export function parseDurationMs(value: unknown): number | undefined {
+  const direct = asNumber(value);
+  if (direct != null) return direct;
+  const rec = asRecord(value);
+  if (!rec) return undefined;
+  const ms = asNumber(rec.ms) ?? asNumber(rec.duration_ms);
+  if (ms != null) return ms;
+  const secs = asNumber(rec.secs) ?? asNumber(rec.seconds);
+  if (secs == null) return undefined;
+  const nanos = asNumber(rec.nanos) ?? asNumber(rec.nanoseconds) ?? 0;
+  return Math.round(secs * 1000 + nanos / 1e6);
+}
+
+export function wallMsFromIso(start?: string, end?: string): number | undefined {
+  if (!start || !end) return undefined;
+  const a = Date.parse(start);
+  const b = Date.parse(end);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return undefined;
+  const delta = b - a;
+  return delta > 0 ? delta : undefined;
+}
+
+export function mapTaskStatus(value: unknown): TaskStatus | undefined {
+  const raw = asString(value)?.trim().toLowerCase().replace(/-/g, "_");
+  if (!raw) return undefined;
+  if (raw === "pending" || raw === "todo") return "pending";
+  if (raw === "in_progress" || raw === "inprogress" || raw === "active") return "in_progress";
+  if (raw === "completed" || raw === "complete" || raw === "done") return "completed";
+  if (raw === "cancelled" || raw === "canceled" || raw === "stopped") return "cancelled";
+  return undefined;
+}
+
+export function compactSessionStats(stats: SessionStats): SessionStats | undefined {
+  const entries = Object.entries(stats).filter(([, value]) => value != null && value !== 0);
+  if (!entries.length) return undefined;
+  return Object.fromEntries(entries) as SessionStats;
 }
 
 export function cwdShortName(cwd: string | undefined): string | undefined {
