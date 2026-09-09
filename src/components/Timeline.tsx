@@ -108,7 +108,6 @@ export function Timeline({
 
   return (
     <div ref={parentRef} className="scrollbar-thin relative h-full overflow-auto">
-      <div className="sprocket-rail" aria-hidden />
       <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((virtual) => {
           const turn = items[virtual.index];
@@ -134,12 +133,16 @@ export function Timeline({
               data-tight={tight ? "true" : undefined}
               aria-current={selected ? "true" : undefined}
               aria-label={`${turn.role === "user" ? "用户" : "助手"}${clock ? ` ${clock}` : ""}`}
-              className="timeline-row absolute left-0 right-0 flex w-full items-start gap-2 pr-3 pl-7 text-left"
+              className="timeline-row absolute left-0 right-0 flex w-full items-start gap-2 pr-3 pl-2 text-left"
               style={{
                 transform: `translateY(${virtual.start}px)`,
                 background: selected ? "var(--accent-dim)" : "transparent",
               }}
             >
+              <span className="timeline-gutter mt-0.5" aria-hidden>
+                <span className="timeline-sprocket" />
+                <span className="timeline-pip" />
+              </span>
               <span className="mt-0.5 shrink-0" style={{ color: failed ? "var(--danger)" : "var(--faint)" }}>
                 {turn.role === "user" ? <User size={14} /> : toolOnly ? <Wrench size={14} /> : <Bot size={14} />}
               </span>

@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from "react";
 import type { ToolInvocation } from "@/lib/ingest/types";
-import { isLongPayload, stringifyUnknown } from "@/lib/ingest/util";
+import { stringifyUnknown } from "@/lib/ingest/util";
+import { presentTool } from "@/lib/tool-view";
 import { Check, Copy, ChevronRight } from "lucide-react";
 
-function CopyButton({ value }: { value: unknown }) {
+export function CopyButton({ value, label = "复制" }: { value: unknown; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -19,48 +20,65 @@ function CopyButton({ value }: { value: unknown }) {
       }}
     >
       {copied ? <Check size={11} /> : <Copy size={11} />}
-      {copied ? "已复制" : "复制"}
+      {copied ? "已复制" : label}
     </button>
   );
 }
 
-function CodeBody({ value }: { value: unknown }) {
+function CodeBody({ value, language }: { value: unknown; language?: string }) {
   const text = stringifyUnknown(value);
   return (
-    <pre
-      className="mt-2 max-h-[480px] overflow-auto rounded-md p-3 text-[12px] leading-5"
-      style={{
-        background: "var(--bg)",
-        border: "1px solid var(--line)",
-        fontFamily: "var(--font-mono), var(--mono)",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-      }}
-    >
-      {text}
-    </pre>
+    <div className="mt-2">
+      {language ? (
+        <div className="mb-1 text-[10px] tracking-wide" style={{ color: "var(--faint)" }}>
+          {language}
+        </div>
+      ) : null}
+      <pre
+        className="max-h-[480px] overflow-auto rounded-md p-3 text-[12px] leading-5"
+        style={{
+          background: "var(--bg)",
+          border: "1px solid var(--line)",
+          fontFamily: "var(--font-mono), var(--mono)",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        }}
+      >
+        {text}
+      </pre>
+    </div>
   );
 }
 
-function toolSummary(tool: ToolInvocation): string {
-  const input = tool.input;
-  if (input && typeof input === "object") {
-    const rec = input as Record<string, unknown>;
-    if (typeof rec.command === "string") return rec.command;
-    if (typeof rec.file_path === "string") return rec.file_path;
-    if (typeof rec.path === "string") return rec.path;
-  }
-  if (typeof input === "string") return input.slice(0, 120);
-  return stringifyUnknown(input).slice(0, 120);
+function FoldSection({
+  label,
+  value,
+  language,
+}: {
+  label: string;
+  value: unknown;
+  language?: string;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <section className="mt-2">
+      <button
+        type="button"
+        className="flex items-center gap-1 text-[11px]"
+        style={{ color: "var(--faint)" }}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ChevronRight size={12} className={open ? "rotate-90" : ""} />
+        {label}
+      </button>
+      {open ? <CodeBody value={value} language={language} /> : null}
+    </section>
+  );
 }
 
 export function ToolCard({ tool }: { tool: ToolInvocation }) {
-  const longInput = isLongPayload(tool.input);
-  const longResult = tool.result !== undefined && isLongPayload(tool.result);
-  const [openIn, setOpenIn] = useState(!longInput);
-  const [openOut, setOpenOut] = useState(!longResult);
+  const view = presentTool(tool);
   const failed = tool.isError || (tool.exitCode != null && tool.exitCode !== 0);
-
   const tone = failed ? "var(--danger)" : "var(--muted)";
 
   return (
@@ -93,41 +111,76 @@ export function ToolCard({ tool }: { tool: ToolInvocation }) {
             </span>
           )}
         </div>
-        <div className="flex gap-1">
-          <CopyButton value={tool.input} />
-          {tool.result !== undefined ? <CopyButton value={tool.result} /> : null}
+        <div className="flex flex-wrap gap-1">
+          <CopyButton value={view.copyInputValue} label={view.copyInputLabel} />
+          {view.copyOutputValue ? (
+            <CopyButton value={view.copyOutputValue} label={view.copyOutputLabel ?? "复制输出"} />
+          ) : null}
         </div>
       </div>
-      <p className="mt-2 text-[12px]" style={{ color: "var(--muted)" }}>
-        {toolSummary(tool)}
-      </p>
-      <section className="mt-2">
-        <button
-          type="button"
-          className="flex items-center gap-1 text-[11px]"
-          style={{ color: "var(--faint)" }}
-          onClick={() => setOpenIn((v) => !v)}
+
+      {view.kind === "bash" ? (
+        <CodeBody value={view.headline} language="shell" />
+      ) : view.kind === "skill" ? (
+        <div className="mt-2">
+          <div className="text-[14px] font-medium" style={{ fontFamily: "var(--font-mono), var(--mono)" }}>
+            {view.headline}
+          </div>
+          {view.extra ? (
+            <p className="mt-1 text-[13px]" style={{ color: "var(--muted)" }}>
+              {view.extra}
+            </p>
+          ) : null}
+        </div>
+      ) : view.kind === "read" || view.kind === "write" || view.kind === "edit" ? (
+        <p
+          className="mt-2 text-[12px] leading-5"
+          style={{ fontFamily: "var(--font-mono), var(--mono)", color: "var(--muted)", wordBreak: "break-word" }}
         >
-          <ChevronRight size={12} className={openIn ? "rotate-90" : ""} />
-          输入
-        </button>
-        {openIn ? <CodeBody value={tool.input} /> : null}
-      </section>
-      {tool.result !== undefined ? (
-        <section className="mt-2">
-          <button
-            type="button"
-            className="flex items-center gap-1 text-[11px]"
-            style={{ color: "var(--faint)" }}
-            onClick={() => setOpenOut((v) => !v)}
-          >
-            <ChevronRight size={12} className={openOut ? "rotate-90" : ""} />
-            输出
-          </button>
-          {openOut ? <CodeBody value={tool.result} /> : null}
-        </section>
+          {view.headline}
+        </p>
+      ) : view.headline ? (
+        <p className="mt-2 text-[12px]" style={{ color: "var(--muted)", wordBreak: "break-word" }}>
+          {view.headline}
+        </p>
       ) : null}
+
+      {view.kind === "generic" ? <FoldSection label="输入" value={tool.input} /> : null}
+
+      {view.outputSections.map((section) => (
+        <FoldSection
+          key={section.label}
+          label={section.label}
+          value={section.text}
+          language={view.kind === "bash" && section.label === "stdout" ? "output" : undefined}
+        />
+      ))}
     </div>
+  );
+}
+
+function InlineText({ text }: { text: string }) {
+  const parts = text.split(/(`[^`]+`)/g);
+  return (
+    <p className="whitespace-pre-wrap">
+      {parts.map((part, i) =>
+        part.startsWith("`") && part.endsWith("`") && part.length >= 2 ? (
+          <code
+            key={i}
+            className="rounded px-1 py-0.5 text-[12px]"
+            style={{
+              fontFamily: "var(--font-mono), var(--mono)",
+              background: "var(--bg)",
+              border: "1px solid var(--line)",
+            }}
+          >
+            {part.slice(1, -1)}
+          </code>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </p>
   );
 }
 
@@ -141,27 +194,11 @@ export function RichText({ text }: { text: string }) {
     <div className="space-y-2 text-[13.5px] leading-6">
       {chunks.map((chunk, i) => {
         if (chunk.startsWith("```")) {
+          const lang = chunk.match(/^```([a-zA-Z0-9_-]*)/)?.[1];
           const inner = chunk.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/```$/, "");
-          return (
-            <pre
-              key={i}
-              className="overflow-auto rounded-md p-3 text-[12px]"
-              style={{
-                background: "var(--bg)",
-                border: "1px solid var(--line)",
-                fontFamily: "var(--font-mono), var(--mono)",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {inner}
-            </pre>
-          );
+          return <CodeBody key={i} value={inner} language={lang || undefined} />;
         }
-        return (
-          <p key={i} className="whitespace-pre-wrap">
-            {chunk}
-          </p>
-        );
+        return <InlineText key={i} text={chunk} />;
       })}
     </div>
   );

@@ -86,13 +86,16 @@ function parseAssistantBlocks(content: unknown): {
 
 function attachToolResults(
   toolsById: Map<string, ToolInvocation>,
+  turnByToolId: Map<string, Turn>,
   content: unknown,
   structured: unknown,
+  row: Record<string, unknown>,
 ) {
   if (!Array.isArray(content)) return;
   const resultBlocks = content
     .map(asRecord)
     .filter((block): block is Record<string, unknown> => Boolean(block && block.type === "tool_result"));
+  const touched = new Set<Turn>();
   for (const block of resultBlocks) {
     const id = asString(block.tool_use_id);
     if (!id) continue;
@@ -103,6 +106,11 @@ function attachToolResults(
       content: block.content,
       structured,
     };
+    const turn = turnByToolId.get(id);
+    if (turn && !touched.has(turn)) {
+      turn.rawEvents = [...(turn.rawEvents ?? []), row];
+      touched.add(turn);
+    }
   }
 }
 
@@ -127,6 +135,7 @@ export function ingestClaude(
   const turns: Turn[] = [];
   const internals: InternalEvent[] = [];
   const toolsById = new Map<string, ToolInvocation>();
+  const turnByToolId = new Map<string, Turn>();
   const tokenSummary: TokenSummary = {};
   let cwd: string | undefined;
   let gitBranch: string | undefined;
@@ -188,8 +197,12 @@ export function ingestClaude(
         blocks,
         tools,
         branchMarker,
+        rawEvents: [row],
       };
-      for (const tool of tools) toolsById.set(tool.id, tool);
+      for (const tool of tools) {
+        toolsById.set(tool.id, tool);
+        turnByToolId.set(tool.id, turn);
+      }
       const usage = asRecord(message?.usage);
       addUsage(tokenSummary, usage);
       model = asString(message?.model) ?? model;
@@ -201,7 +214,7 @@ export function ingestClaude(
     if (type === "user") {
       const message = asRecord(row.message);
       const content = messageContent(message);
-      attachToolResults(toolsById, content, row.toolUseResult);
+      attachToolResults(toolsById, turnByToolId, content, row.toolUseResult, row);
       const text = humanUserText(row);
       if (!text) {
         if (row.isMeta === true) {
@@ -222,6 +235,7 @@ export function ingestClaude(
         blocks: [{ kind: "text", text }],
         tools: [],
         branchMarker,
+        rawEvents: [row],
       });
       lastIncludedUuid = uuid;
       continue;

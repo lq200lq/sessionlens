@@ -24,6 +24,8 @@ export type Turn = {
   blocks: ContentBlock[];
   tools: ToolInvocation[];
   branchMarker?: "branch" | "retry";
+  /** Original jsonl row(s) that produced this turn, in file order. */
+  rawEvents?: unknown[];
 };
 
 export type InternalEvent = {

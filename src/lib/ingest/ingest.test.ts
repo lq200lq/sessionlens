@@ -66,6 +66,8 @@ describe("ingestSessionLog", () => {
     expect(result.session.id).toBe("sid");
     expect(result.session.title).toContain("Fix the tests");
     expect(result.session.turns).toHaveLength(2);
+    expect(result.session.turns[0]?.rawEvents).toHaveLength(1);
+    expect(result.session.turns[1]?.rawEvents).toHaveLength(1);
     expect(result.session.model).toBe("deepseek-v4-flash");
     expect(result.session.tokenSummary?.inputTokens).toBe(10);
   });
@@ -121,6 +123,10 @@ describe("ingestSessionLog", () => {
     expect(assistant?.tools[0]?.name).toBe("Bash");
     expect(assistant?.tools[0]?.isError).toBe(true);
     expect(assistant?.blocks.some((b) => b.kind === "thinking")).toBe(true);
+    expect(assistant?.rawEvents).toHaveLength(2);
+    expect((assistant?.rawEvents?.[0] as { type?: string })?.type).toBe("assistant");
+    expect((assistant?.rawEvents?.[1] as { type?: string })?.type).toBe("user");
+    expect(result.session.turns.find((t) => t.role === "user")?.rawEvents).toHaveLength(1);
   });
 
   it("does not title from isMeta or tool_result; prefers last ai-title", () => {
@@ -337,6 +343,9 @@ describe("ingestSessionLog", () => {
     expect(exec?.exitCode).toBe(1);
     const wait = result.session.turns.flatMap((t) => t.tools).find((t) => t.name === "wait");
     expect(wait?.result).toBe("done");
+    expect(userTurns[0]?.rawEvents).toHaveLength(1);
+    const assistantTurn = result.session.turns.find((t) => t.role === "assistant");
+    expect((assistantTurn?.rawEvents?.length ?? 0) >= 4).toBe(true);
   });
 
   it("skips bad lines and keeps unknown types as internals", () => {

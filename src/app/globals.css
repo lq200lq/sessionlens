@@ -87,24 +87,54 @@ input {
   letter-spacing: -0.04em;
 }
 
-.sprocket-rail {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 10px;
-  width: 8px;
+.timeline-gutter {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
   pointer-events: none;
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      var(--line) 0 5px,
-      transparent 5px 12px
-    );
-  mask-image: linear-gradient(to right, #000 0 3px, transparent 3px 5px, #000 5px 8px);
+}
+
+.timeline-sprocket {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translateY(-50%);
+  background-image:
+    radial-gradient(circle closest-side, var(--line) 100%, transparent 100%),
+    radial-gradient(circle closest-side, var(--line) 100%, transparent 100%),
+    radial-gradient(circle closest-side, var(--line) 100%, transparent 100%),
+    radial-gradient(circle closest-side, var(--line) 100%, transparent 100%);
+  background-size: 3px 3px;
+  background-repeat: no-repeat;
+  background-position:
+    0 0,
+    5px 0,
+    0 5px,
+    5px 5px;
+}
+
+.timeline-pip {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease;
+}
+
+.timeline-row[data-selected="true"] .timeline-pip {
+  opacity: 1;
 }
 
 .timeline-row {
-  transition: background-color 120ms ease, box-shadow 160ms ease;
+  transition: background-color 120ms ease;
   padding-top: 9px;
   padding-bottom: 9px;
 }
@@ -156,21 +186,14 @@ input {
   line-height: 1.6;
 }
 
-.timeline-row[data-selected="true"] {
-  box-shadow: inset 3px 0 0 var(--accent), inset 3px 0 18px -6px var(--accent-glow);
-}
-
 .drop-veil {
   backdrop-filter: blur(6px);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .timeline-row {
+  .timeline-row,
+  .timeline-pip {
     transition: none;
-  }
-
-  .timeline-row[data-selected="true"] {
-    box-shadow: inset 3px 0 0 var(--accent);
   }
 
   .drop-veil {

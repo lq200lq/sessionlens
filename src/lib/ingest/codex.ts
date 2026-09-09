@@ -58,6 +58,7 @@ export function ingestCodex(
   const turns: Turn[] = [];
   const internals: InternalEvent[] = [];
   const toolsByCallId = new Map<string, ToolInvocation>();
+  const turnByCallId = new Map<string, Turn>();
   let currentAssistant: Turn | undefined;
   let cwd: string | undefined;
   let gitBranch: string | undefined;
@@ -93,10 +94,15 @@ export function ingestCodex(
       role: "assistant",
       blocks: [],
       tools: [],
+      rawEvents: [],
     };
     turns.push(turn);
     currentAssistant = turn;
     return turn;
+  };
+
+  const pushRaw = (turn: Turn, event: unknown) => {
+    turn.rawEvents = [...(turn.rawEvents ?? []), event];
   };
 
   for (const row of rows) {
@@ -188,12 +194,14 @@ export function ingestCodex(
           role: "user",
           blocks: text ? [{ kind: "text", text }] : [],
           tools: [],
+          rawEvents: [row],
         });
         continue;
       }
       if (role === "assistant") {
         const text = collectText(payload.content, "output_text");
         const turn = ensureAssistant(ts);
+        pushRaw(turn, row);
         if (text) turn.blocks.push({ kind: "text", text });
         continue;
       }
@@ -203,6 +211,7 @@ export function ingestCodex(
 
     if (payloadType === "reasoning") {
       const turn = ensureAssistant(ts);
+      pushRaw(turn, row);
       const summary = payload.summary;
       let thinking = "";
       if (Array.isArray(summary)) {
@@ -218,6 +227,7 @@ export function ingestCodex(
 
     if (payloadType === "function_call" || payloadType === "custom_tool_call") {
       const turn = ensureAssistant(ts);
+      pushRaw(turn, row);
       const callId = asString(payload.call_id) ?? asString(payload.id) ?? crypto.randomUUID();
       let input: unknown = payloadType === "custom_tool_call" ? payload.input : payload.arguments;
       if (typeof input === "string") {
@@ -235,6 +245,7 @@ export function ingestCodex(
       };
       turn.tools.push(tool);
       toolsByCallId.set(callId, tool);
+      turnByCallId.set(callId, turn);
       continue;
     }
 
@@ -246,6 +257,8 @@ export function ingestCodex(
       if (callId && toolsByCallId.has(callId)) {
         const tool = toolsByCallId.get(callId)!;
         tool.result = outputText(payload.output);
+        const owner = turnByCallId.get(callId);
+        if (owner) pushRaw(owner, row);
       } else {
         pushInternal(row, payloadType, "unpaired tool output");
       }
