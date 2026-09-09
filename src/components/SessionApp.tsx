@@ -17,6 +17,7 @@ import {
   touchStoredSession,
   type StoredSession,
 } from "@/lib/storage";
+import { MOTION, gsap, prefersReducedMotion, useGSAP } from "@/lib/motion";
 import { SourceBadge } from "./SourceBadge";
 import { ThemeToggle } from "./ThemeToggle";
 import { Timeline, matchesFilter, type Filter } from "./Timeline";
@@ -47,7 +48,10 @@ export function SessionApp() {
   const fileRef = useRef<HTMLInputElement>(null);
   const detailRef = useRef<HTMLElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+  const backdropRef = useRef<HTMLButtonElement>(null);
   const dragDepth = useRef(0);
+  const skipDrawerAnim = useRef(true);
 
   const reloadLibrary = useCallback(async () => {
     setLibrary(await listStoredSessions());
@@ -237,6 +241,80 @@ export function SessionApp() {
     [session, selectedTurn],
   );
 
+  useGSAP(() => {
+    const aside = asideRef.current;
+    const backdrop = backdropRef.current;
+    if (!aside) return;
+
+    const desktop = window.matchMedia("(min-width: 768px)").matches;
+    const reduce = prefersReducedMotion();
+
+    if (desktop) {
+      gsap.set(aside, { clearProps: "transform,x,xPercent,opacity,visibility" });
+      if (backdrop) gsap.set(backdrop, { autoAlpha: 0 });
+      return;
+    }
+
+    const instant = skipDrawerAnim.current;
+    skipDrawerAnim.current = false;
+
+    if (instant) {
+      if (backdrop) gsap.set(backdrop, { autoAlpha: drawerOpen ? 1 : 0 });
+      if (reduce) gsap.set(aside, { autoAlpha: drawerOpen ? 1 : 0, xPercent: 0 });
+      else gsap.set(aside, { xPercent: drawerOpen ? 0 : -100, autoAlpha: 1 });
+      return;
+    }
+
+    const overlayDur = reduce ? 0.12 : MOTION.overlay;
+    const drawerDur = reduce ? 0.12 : MOTION.drawer;
+    if (drawerOpen) {
+      if (backdrop) gsap.to(backdrop, { autoAlpha: 1, duration: overlayDur, ease: MOTION.ease, overwrite: "auto" });
+      gsap.to(aside, {
+        xPercent: 0,
+        autoAlpha: 1,
+        duration: drawerDur,
+        ease: MOTION.ease,
+        overwrite: "auto",
+      });
+    } else {
+      if (backdrop) gsap.to(backdrop, { autoAlpha: 0, duration: overlayDur, ease: MOTION.ease, overwrite: "auto" });
+      gsap.to(aside, {
+        xPercent: reduce ? 0 : -100,
+        autoAlpha: reduce ? 0 : 1,
+        duration: drawerDur,
+        ease: MOTION.ease,
+        overwrite: "auto",
+      });
+    }
+  }, { dependencies: [drawerOpen] });
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const onChange = () => {
+      const aside = asideRef.current;
+      const backdrop = backdropRef.current;
+      if (!aside) return;
+      if (mq.matches) {
+        gsap.set(aside, { clearProps: "transform,x,xPercent,opacity,visibility" });
+        if (backdrop) gsap.set(backdrop, { autoAlpha: 0 });
+        return;
+      }
+      const reduce = prefersReducedMotion();
+      if (drawerOpen) {
+        if (backdrop) gsap.set(backdrop, { autoAlpha: 1 });
+        gsap.set(aside, { xPercent: 0, autoAlpha: 1 });
+      } else if (reduce) {
+        if (backdrop) gsap.set(backdrop, { autoAlpha: 0 });
+        gsap.set(aside, { autoAlpha: 0, xPercent: 0 });
+      } else {
+        if (backdrop) gsap.set(backdrop, { autoAlpha: 0 });
+        gsap.set(aside, { xPercent: -100, autoAlpha: 1 });
+      }
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [drawerOpen]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -262,24 +340,7 @@ export function SessionApp() {
 
   return (
     <div ref={rootRef} className="relative flex h-dvh flex-col" data-drop-root>
-      {(dragging || busy) && (
-        <div
-          className="drop-veil pointer-events-none absolute inset-0 z-40 flex items-center justify-center"
-          style={{ background: "color-mix(in srgb, var(--bg) 72%, transparent)" }}
-        >
-          <div
-            className="rounded-xl border px-8 py-6 text-center"
-            style={{ borderColor: "var(--accent)", background: "var(--bg-elev)", color: "var(--text)" }}
-          >
-            <div className="brand-mark text-[22px]">{busy ? "正在解析…" : "松开以导入 jsonl"}</div>
-            {!busy ? (
-              <p className="mt-1 text-[13px]" style={{ color: "var(--muted)" }}>
-                支持一次多个文件
-              </p>
-            ) : null}
-          </div>
-        </div>
-      )}
+      {dragging || busy ? <DropVeil busy={busy} /> : null}
 
       <header
         className="flex items-center gap-3 border-b px-3 py-2"
@@ -287,7 +348,7 @@ export function SessionApp() {
       >
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border md:hidden"
+          className="press-scale inline-flex h-8 w-8 items-center justify-center rounded-md border md:hidden"
           style={{ borderColor: "var(--line)" }}
           onClick={() => setDrawerOpen(true)}
           aria-label="最近会话"
@@ -314,7 +375,7 @@ export function SessionApp() {
         <button
           type="button"
           disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px]"
+          className="press-scale inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px]"
           style={{ borderColor: "var(--line)", background: "var(--accent-dim)", color: "var(--accent)" }}
           onClick={() => fileRef.current?.click()}
         >
