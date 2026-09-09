@@ -179,14 +179,16 @@ function Thinking({ text }: { text: string }) {
         style={{ color: "var(--muted)" }}
         onClick={() => setOpen((v) => !v)}
       >
-        <ChevronDown size={14} className={open ? "" : "-rotate-90"} />
+        <ChevronDown size={14} className={`fold-chevron ${open ? "" : "-rotate-90"}`} />
         推理
       </button>
-      {open ? (
-        <div className="px-3 pb-3 text-[13px]" style={{ color: "var(--muted)" }}>
-          <RichText text={text} />
+      <div className={`fold-grid ${open ? "fold-grid-open" : ""}`}>
+        <div className="min-h-0 overflow-hidden">
+          <div className="px-3 pb-3 text-[13px]" style={{ color: "var(--muted)" }}>
+            <RichText text={text} />
+          </div>
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

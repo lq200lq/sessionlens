@@ -68,10 +68,14 @@ function FoldSection({
         style={{ color: "var(--faint)" }}
         onClick={() => setOpen((v) => !v)}
       >
-        <ChevronRight size={12} className={open ? "rotate-90" : ""} />
+        <ChevronRight size={12} className={`fold-chevron ${open ? "rotate-90" : ""}`} />
         {label}
       </button>
-      {open ? <CodeBody value={value} language={language} /> : null}
+      <div className={`fold-grid ${open ? "fold-grid-open" : ""}`}>
+        <div className="min-h-0 overflow-hidden">
+          <CodeBody value={value} language={language} />
+        </div>
+      </div>
     </section>
   );
 }

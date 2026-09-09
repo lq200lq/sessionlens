@@ -386,17 +386,19 @@ export function SessionApp() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {drawerOpen ? (
-          <button
-            type="button"
-            className="fixed inset-0 z-10 md:hidden"
-            style={{ background: "color-mix(in srgb, var(--bg) 55%, transparent)" }}
-            aria-label="关闭最近会话"
-            onClick={() => setDrawerOpen(false)}
-          />
-        ) : null}
+        <button
+          ref={backdropRef}
+          type="button"
+          className={`fixed inset-0 z-10 opacity-0 md:hidden ${drawerOpen ? "" : "pointer-events-none"}`}
+          style={{ background: "color-mix(in srgb, var(--bg) 55%, transparent)" }}
+          aria-label="关闭最近会话"
+          aria-hidden={!drawerOpen}
+          tabIndex={drawerOpen ? 0 : -1}
+          onClick={() => setDrawerOpen(false)}
+        />
         <aside
-          className={`scrollbar-thin w-[280px] shrink-0 overflow-auto border-r max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:w-[86vw] max-md:shadow-xl ${drawerOpen ? "max-md:block" : "max-md:hidden"} md:block`}
+          ref={asideRef}
+          className={`library-aside scrollbar-thin w-[280px] shrink-0 overflow-auto border-r max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-20 max-md:w-[86vw] max-md:shadow-xl md:block ${drawerOpen ? "" : "max-md:pointer-events-none"}`}
           style={{ borderColor: "var(--line)", background: "var(--bg-elev)" }}
         >
           <div className="flex items-center justify-between px-3 py-2 text-[11px]" style={{ color: "var(--faint)" }}>
@@ -598,20 +600,86 @@ function InternalsList({ session }: { session: Session }) {
   );
 }
 
-function EmptyState({ onPick }: { onPick: () => void }) {
+function DropVeil({ busy }: { busy: boolean }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useGSAP(
+    () => {
+      const root = rootRef.current;
+      if (!root) return;
+      const card = root.querySelector("[data-drop-card]");
+      const reduce = prefersReducedMotion();
+      const duration = reduce ? 0.12 : MOTION.veil;
+      gsap.fromTo(root, { autoAlpha: 0 }, { autoAlpha: 1, duration, ease: MOTION.ease });
+      if (card) {
+        gsap.fromTo(
+          card,
+          { y: reduce ? 0 : 10, opacity: 0, scale: reduce ? 1 : 0.97 },
+          { y: 0, opacity: 1, scale: 1, duration, ease: MOTION.ease },
+        );
+      }
+    },
+    { scope: rootRef },
+  );
+
   return (
-    <div className="flex flex-1 items-center justify-center p-6">
+    <div
+      ref={rootRef}
+      className="drop-veil pointer-events-none absolute inset-0 z-40 flex items-center justify-center"
+      style={{ background: "color-mix(in srgb, var(--bg) 72%, transparent)" }}
+    >
+      <div
+        data-drop-card
+        className="rounded-xl border px-8 py-6 text-center"
+        style={{ borderColor: "var(--accent)", background: "var(--bg-elev)", color: "var(--text)" }}
+      >
+        <div className="brand-mark text-[22px]">{busy ? "正在解析…" : "松开以导入 jsonl"}</div>
+        {!busy ? (
+          <p className="mt-1 text-[13px]" style={{ color: "var(--muted)" }}>
+            支持一次多个文件
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ onPick }: { onPick: () => void }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useGSAP(
+    () => {
+      const root = rootRef.current;
+      if (!root) return;
+      const items = root.querySelectorAll("[data-empty-item]");
+      const reduce = prefersReducedMotion();
+      gsap.from(items, {
+        opacity: 0,
+        y: reduce ? 0 : 8,
+        duration: reduce ? 0.12 : MOTION.empty,
+        stagger: reduce ? 0 : 0.04,
+        ease: MOTION.ease,
+      });
+    },
+    { scope: rootRef },
+  );
+
+  return (
+    <div ref={rootRef} className="flex flex-1 items-center justify-center p-6">
       <button
         type="button"
         onClick={onPick}
-        className="w-full max-w-xl rounded-xl border px-8 py-14 text-center"
+        className="press-scale w-full max-w-xl rounded-xl border px-8 py-14 text-center"
         style={{ borderColor: "var(--line)", background: "var(--bg-elev)" }}
       >
-        <div className="brand-mark text-[22px]">拖放 jsonl 到此处</div>
-        <p className="mt-2 text-[13px]" style={{ color: "var(--muted)" }}>
+        <div data-empty-item className="brand-mark text-[22px]">
+          拖放 jsonl 到此处
+        </div>
+        <p data-empty-item className="mt-2 text-[13px]" style={{ color: "var(--muted)" }}>
           解析只在这台浏览器里完成，文件不会上传。
         </p>
         <p
+          data-empty-item
           className="mt-5 text-left text-[11px] leading-5"
           style={{ color: "var(--faint)", fontFamily: "var(--font-mono), var(--mono)" }}
         >
@@ -619,7 +687,7 @@ function EmptyState({ onPick }: { onPick: () => void }) {
           <br />
           Codex　　　会话目录里的 *.jsonl
         </p>
-        <p className="mt-4 text-[12px]" style={{ color: "var(--faint)" }}>
+        <p data-empty-item className="mt-4 text-[12px]" style={{ color: "var(--faint)" }}>
           可一次选择多个文件 · 超过 50MB 会警告 · 超过 150MB 会拒绝
         </p>
       </button>
