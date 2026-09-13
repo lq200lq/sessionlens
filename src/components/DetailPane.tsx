@@ -244,8 +244,8 @@ export function SummaryBar({ session }: { session: Session }) {
   if (!chips.length) return null;
   return (
     <div
-      className="flex flex-wrap gap-x-4 gap-y-1 border-b px-4 py-2 text-[11px]"
-      style={{ borderColor: "var(--line)", color: "var(--muted)" }}
+      className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-[11px]"
+      style={{ color: "var(--muted)" }}
     >
       {chips.map((chip) => (
         <Chip key={`${chip.label}-${chip.value}`} {...chip} />
@@ -270,13 +270,23 @@ export function TaskPanel({
   selectedTurnId?: string;
   onSelectTurn: (id: string) => void;
 }) {
+  const [open, setOpen] = useState(true);
   if (!tasks.length) return null;
   return (
-    <div className="border-b px-4 py-2" style={{ borderColor: "var(--line)" }}>
-      <div className="mb-1.5 text-[11px] uppercase tracking-wider" style={{ color: "var(--faint)" }}>
+    <div className="shrink-0 border-t px-3 py-1.5" style={{ borderColor: "var(--line)", background: "var(--bg-elev)" }}>
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 text-[11px] uppercase tracking-wider"
+        style={{ color: "var(--faint)" }}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <ChevronDown size={14} className={`fold-chevron ${open ? "" : "-rotate-90"}`} />
         任务 {tasks.length}
-      </div>
-      <ul className="scrollbar-thin max-h-36 space-y-0.5 overflow-auto">
+      </button>
+      <div className={`fold-grid ${open ? "fold-grid-open" : ""}`}>
+        <div className="min-h-0 overflow-hidden">
+          <ul className="scrollbar-thin mt-1 max-h-[min(12rem,32vh)] space-y-0.5 overflow-auto">
         {tasks.map((task) => {
           const active = Boolean(task.originTurnId && task.originTurnId === selectedTurnId);
           const clickable = Boolean(task.originTurnId);
@@ -324,7 +334,9 @@ export function TaskPanel({
             </li>
           );
         })}
-      </ul>
+          </ul>
+        </div>
+      </div>
     </div>
   );
 }

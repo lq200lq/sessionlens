@@ -12,7 +12,7 @@ import {
   isToolOnlyTurn,
   sameCalendarDay,
 } from "@/lib/display";
-import { Wrench, User, Bot, GitBranch } from "lucide-react";
+import { Wrench, User, Bot } from "lucide-react";
 
 export type Filter = "all" | "user" | "tools" | "errors";
 
@@ -152,11 +152,6 @@ export function Timeline({
                 {dayLabel ? <span className="timeline-day">{dayLabel}</span> : null}
                 <span className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--faint)" }}>
                   <span className="shrink-0">{turn.role === "user" ? "用户" : "助手"}</span>
-                  {turn.branchMarker === "branch" ? (
-                    <span className="inline-flex shrink-0 items-center gap-0.5" style={{ color: "var(--accent)" }}>
-                      <GitBranch size={10} /> 分支
-                    </span>
-                  ) : null}
                   {turn.branchMarker === "retry" ? (
                     <span className="shrink-0" style={{ color: "var(--accent)" }}>
                       重试
