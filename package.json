@@ -2,6 +2,22 @@
   "name": "sessionlens",
   "version": "0.1.0",
   "private": true,
+  "description": "Browser-only viewer for Claude Code and Codex session jsonl logs",
+  "license": "MIT",
+  "homepage": "https://sessionlens-gamma.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lq200lq/sessionlens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lq200lq/sessionlens/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "jsonl",
+    "session"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
